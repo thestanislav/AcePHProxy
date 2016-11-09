@@ -194,7 +194,7 @@ class StreamClient {
 			return;
 		}
 
-		// без этого при больших данный появляется ошибка  errno=11 Resource temporarily unavailable
+		// без этого при больших данных появляется ошибка  errno=11 Resource temporarily unavailable
         stream_set_blocking($this->socket, true);
 
 		// а вот так работает. хотя функция "Returns a result code, as an integer"
