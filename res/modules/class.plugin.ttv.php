@@ -18,7 +18,7 @@ class AcePlugin_ttv extends AcePlugin_common {
 		if ($req->getReqType() == 'HEAD' or ($req->isRanged() and $req->isEmptyRanged())) {
 			return $req->response(
 				'HTTP/1.1 200 OK' . "\r\n" .
-				'Content-Length: 14324133' . "\r\n" . // TODO хедеры от балды, поправить
+				'Content-Length: 14324133000' . "\r\n" . // TODO хедеры от балды, поправить
 				'Accept-Ranges: bytes' . "\r\n\r\n"
 			);
 		}
@@ -30,6 +30,15 @@ class AcePlugin_ttv extends AcePlugin_common {
 
 		// передаем также request headers клиента
 		switch ($type) {
+            case 'playlist':
+                return $req->response(
+                    'HTTP/1.1 200 OK' . "\r\n" .
+                    'Content-Disposition: inline; filename=playlist.m3u' . "\r\n" .
+                    'Content-Type: text/plain; charset=UTF-8' . "\r\n\r\n" .
+                    $this->playlist($req)
+                );
+                break;
+
 			case 'pid':
 				$conn = $this->ace->startpid($pid);
 				break;
@@ -43,7 +52,7 @@ class AcePlugin_ttv extends AcePlugin_common {
 					if (stripos($e->getMessage(), 'curl') === 0) {
 						throw new Exception('Torrent tv timed out');
 					}
-					$this->torrentAuth();
+					$this->tryAuthorize();
 					$tmp = $this->parse4PID($pid);
 				}
 				// tmp использовалась, чтобы pid не попортить раньше времени
@@ -63,21 +72,78 @@ class AcePlugin_ttv extends AcePlugin_common {
 	}
 
 
-	protected function torrentAuth() {
-		error_log('Authorizing on torrent');
-		$url = "http://torrent-tv.ru/auth.php";
-		$opts = array(
-			CURLOPT_POST           => true,
-			CURLOPT_POSTFIELDS     => 'email=' . urlencode($this->ttv_login) . '&password=' . 
-				urlencode($this->ttv_psw) . '&enter=' . urlencode('Войти'),
-		);
-		$res = $this->makeRequest($url, $opts);
+    protected function isAuthorized()
+    {
+        $url = "http://torrent-tv.ru/";
+        $res = $this->makeRequest($url);
+        return strpos($res, 'class="cab_link"');
+    }
 
-		if (!preg_match('~"Refresh".*URL="cabinet\.php"~', $res)) {
-			throw new Exception('Login failed');
-		}
-		return true;
-	}
+    protected function tryAuthorize()
+    {
+        if (!$this->isAuthorized()) {
+            error_log('Authorizing on torrent');
+            $url = "http://torrent-tv.ru/auth.php";
+            $opts = array(
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => 'email=' . urlencode($this->ttv_login) . '&password=' .
+                    urlencode($this->ttv_psw) . '&enter=' . urlencode('Войти'),
+            );
+            $this->makeRequest($url, $opts);
+            if (!$this->isAuthorized()) {
+                throw new Exception('Login failed');
+            }
+        }
+        return true;
+    }
+
+    protected function playlist(ClientRequest $request) {
+        if (!$this->tryAuthorize()) {
+            return '';
+        }
+
+        $plCache = __DIR__ . '/../playlist_ttv.m3u';
+        if (!file_exists($plCache) || (time() - filemtime($plCache)) > $this->ttv_plct) {
+            $content = $this->makeRequest('http://torrent-tv.ru/c_playlist.php');
+            if (!preg_match('~var\s+plLink\s*=\s*\'([^\']+)\'~', $content, $match)) {
+                return '';
+            }
+
+            $curl = curl_init();
+            curl_setopt_array($curl, array(
+                CURLOPT_URL => $match[1],
+                CURLOPT_VERBOSE => false,
+                CURLOPT_HEADER => false,
+                CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_0,
+                CURLOPT_USERAGENT => 'Mozilla/5.0',
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_CONNECTTIMEOUT => 3,
+                CURLOPT_TIMEOUT => 10 // чем больше тут секунд, тем дольше висит UI при факапе на стороне ttv.ru. форкаться чтоль..
+            ));
+            $content = curl_exec($curl);
+            $lines = preg_split('~[\n\r]+~', $content);
+            foreach ($lines as &$_line) {
+                if (strpos($_line, '://')) {
+                    $urlComponents = parse_url($_line);
+                    if ($urlComponents['scheme'] == 'acestream') {
+                        $_line = 'http://' . $request->getHttpHost() . '/ttv/pid/' . $urlComponents['host'];
+                    }else {
+                        $_line = 'http://' . $request->getHttpHost() . '/ttv/channel/' .urlencode($_line) . '/video.mp4';
+                    }
+                }
+            }
+            file_put_contents($plCache, implode("\r\n", $lines));
+        }
+
+
+
+
+        return file_get_contents($plCache);
+
+    }
+
+
 	protected function parse4PID($trid) {
 		$url = "http://torrent-tv.ru/torrent-online.php?translation=" . $trid;
 		$res = $this->makeRequest($url);
