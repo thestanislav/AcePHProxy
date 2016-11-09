@@ -193,6 +193,10 @@ class StreamClient {
 			# error_log('No data for client got from buffer');
 			return;
 		}
+
+		// без этого при больших данный появляется ошибка  errno=11 Resource temporarily unavailable
+        stream_set_blocking($this->socket, true);
+
 		// а вот так работает. хотя функция "Returns a result code, as an integer"
 		// проверка же показала, что выдается число байт
 		$b = stream_socket_sendto($this->socket, $put);
