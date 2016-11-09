@@ -18,7 +18,7 @@ class AcePlugin_ttv extends AcePlugin_common {
 		if ($req->getReqType() == 'HEAD' or ($req->isRanged() and $req->isEmptyRanged())) {
 			return $req->response(
 				'HTTP/1.1 200 OK' . "\r\n" .
-				'Content-Length: 14324133000' . "\r\n" . // TODO хедеры от балды, поправить
+				'Content-Length: 14324133' . "\r\n" . // TODO хедеры от балды, поправить
 				'Accept-Ranges: bytes' . "\r\n\r\n"
 			);
 		}
